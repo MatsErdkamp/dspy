@@ -42,7 +42,8 @@ dependencies = [
     "rich>=13.7.1",
     "numpy>=1.26.0",
     "xxhash>=3.5.0",
-    "gepa[dspy]==0.0.4"
+    "gepa[dspy] @ git+https://github.com/MatsErdkamp/gepa.git",
+    "datasets==3.6.0",
 ]
 
 [project.optional-dependencies]

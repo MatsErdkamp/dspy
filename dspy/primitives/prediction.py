@@ -3,14 +3,14 @@ from dspy.primitives.example import Example
 
 class Prediction(Example):
     """A prediction object that contains the output of a DSPy module.
-    
+
     Prediction inherits from Example.
-    
+
     To allow feedback-augmented scores, Prediction supports comparison operations
     (<, >, <=, >=) for Predictions with a `score` field. The comparison operations
     compare the 'score' values as floats. For equality comparison, Predictions are equal
     if their underlying data stores are equal (inherited from Example).
-    
+
     Arithmetic operations (+, /, etc.) are also supported for Predictions with a 'score'
     field, operating on the score value.
     """
@@ -52,7 +52,9 @@ class Prediction(Example):
 
     def __float__(self):
         if "score" not in self._store:
-            raise ValueError("Prediction object does not have a 'score' field to convert to float.")
+            raise ValueError(
+                "Prediction object does not have a 'score' field to convert to float."
+            )
         return float(self._store["score"])
 
     def __add__(self, other):
@@ -128,11 +130,15 @@ class Completions:
         else:
             kwargs = list_or_dict
 
-        assert all(isinstance(v, list) for v in kwargs.values()), "All values must be lists"
+        assert all(
+            isinstance(v, list) for v in kwargs.values()
+        ), "All values must be lists"
 
         if kwargs:
             length = len(next(iter(kwargs.values())))
-            assert all(len(v) == length for v in kwargs.values()), "All lists must have the same length"
+            assert all(
+                len(v) == length for v in kwargs.values()
+            ), "All lists must have the same length"
 
         self._completions = kwargs
 
@@ -150,11 +156,15 @@ class Completions:
 
     def __getattr__(self, name):
         if name == "_completions":
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'"
+            )
         if name in self._completions:
             return self._completions[name]
 
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )
 
     def __len__(self):
         # Return the length of the list for one of the keys

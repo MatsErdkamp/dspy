@@ -18,11 +18,15 @@ class LoggerAdapter:
     def log(self, x: str):
         self.logger.info(x)
 
+
 DSPyTrace = list[tuple[Any, dict[str, Any], Prediction]]
+
 
 class ScoreWithFeedback(Prediction):
     score: float
+    subscores: dict[str, float]
     feedback: str
+
 
 class PredictorFeedbackFn(Protocol):
     def __call__(
@@ -47,6 +51,7 @@ class PredictorFeedbackFn(Protocol):
         The feedback is a string that is used to guide the evolution of the predictor.
         """
         ...
+
 
 class DspyAdapter(GEPAAdapter[Example, TraceData, Prediction]):
     def __init__(
@@ -83,6 +88,7 @@ class DspyAdapter(GEPAAdapter[Example, TraceData, Prediction]):
         if capture_traces:
             # bootstrap_trace_data-like flow with trace capture
             from ..bootstrap_finetune import bootstrap_trace_data
+
             trajs = bootstrap_trace_data(
                 program=program,
                 dataset=batch,
@@ -95,16 +101,25 @@ class DspyAdapter(GEPAAdapter[Example, TraceData, Prediction]):
             )
             scores = []
             outputs = []
+            subscores = []
             for t in trajs:
                 outputs.append(t["prediction"])
                 if hasattr(t["prediction"], "__class__") and t.get("score") is None:
                     scores.append(self.failure_score)
+                    subscores.append({})
                 else:
                     score = t["score"]
                     if hasattr(score, "score"):
                         score = score["score"]
                     scores.append(score)
-            return EvaluationBatch(outputs=outputs, scores=scores, trajectories=trajs)
+                    if hasattr(t["score"], "subscores"):
+                        subscores.append(t["score"]["subscores"])
+                    else:
+                        subscores.append({})
+
+            return EvaluationBatch(
+                outputs=outputs, scores=scores, subscores=subscores, trajectories=trajs
+            )
         else:
             evaluator = Evaluate(
                 devset=batch,
@@ -113,16 +128,25 @@ class DspyAdapter(GEPAAdapter[Example, TraceData, Prediction]):
                 return_all_scores=True,
                 failure_score=self.failure_score,
                 provide_traceback=True,
-                max_errors=len(batch) * 100
+                max_errors=len(batch) * 100,
             )
             res = evaluator(program)
             outputs = [r[1] for r in res.results]
             scores = [r[2] for r in res.results]
             scores = [s["score"] if hasattr(s, "score") else s for s in scores]
-            return EvaluationBatch(outputs=outputs, scores=scores, trajectories=None)
+
+            subscores = [
+                s["subscores"] if hasattr(s, "subscores") else {} for s in res.results
+            ]
+            subscores = subscores if any(subscores) else None
+
+            return EvaluationBatch(
+                outputs=outputs, scores=scores, subscores=subscores, trajectories=None
+            )
 
     def make_reflective_dataset(self, candidate, eval_batch, components_to_update):
         from ..bootstrap_finetune import FailedPrediction
+
         program = self.build_program(candidate)
 
         ret_d: dict[str, list[dict[str, Any]]] = {}
@@ -143,9 +167,15 @@ class DspyAdapter(GEPAAdapter[Example, TraceData, Prediction]):
                 if hasattr(module_score, "score"):
                     module_score = module_score["score"]
 
-                trace_instances = [t for t in trace if t[0].signature.equals(module.signature)]
+                trace_instances = [
+                    t for t in trace if t[0].signature.equals(module.signature)
+                ]
                 if not self.add_format_failure_as_feedback:
-                    trace_instances = [t for t in trace_instances if not isinstance(t[2], FailedPrediction)]
+                    trace_instances = [
+                        t
+                        for t in trace_instances
+                        if not isinstance(t[2], FailedPrediction)
+                    ]
                 if len(trace_instances) == 0:
                     continue
 
@@ -201,8 +231,13 @@ class DspyAdapter(GEPAAdapter[Example, TraceData, Prediction]):
                     adapter = ChatAdapter()
                     structure_instruction = ""
                     for dd in adapter.format(module.signature, [], {}):
-                        structure_instruction += dd["role"] + ": " + dd["content"] + "\n"
-                    d["Feedback"] = "Your output failed to parse. Follow this structure:\n" + structure_instruction
+                        structure_instruction += (
+                            dd["role"] + ": " + dd["content"] + "\n"
+                        )
+                    d["Feedback"] = (
+                        "Your output failed to parse. Follow this structure:\n"
+                        + structure_instruction
+                    )
                     # d['score'] = self.failure_score
                 else:
                     feedback_fn = self.feedback_map[pred_name]
@@ -214,7 +249,9 @@ class DspyAdapter(GEPAAdapter[Example, TraceData, Prediction]):
                         captured_trace=trace,
                     )
                     d["Feedback"] = fb["feedback"]
-                    assert fb["score"] == module_score, f"Currently, GEPA only supports feedback functions that return the same score as the module's score. However, the module-level score is {module_score} and the feedback score is {fb.score}."
+                    assert (
+                        fb["score"] == module_score
+                    ), f"Currently, GEPA only supports feedback functions that return the same score as the module's score. However, the module-level score is {module_score} and the feedback score is {fb.score}."
                     # d['score'] = fb.score
                 items.append(d)
 
