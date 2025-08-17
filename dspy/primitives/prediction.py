@@ -18,11 +18,24 @@ class Prediction(Example):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        # Example sets a few helper attributes that are not relevant for a
+        # prediction object.  They can contain objects (e.g., History
+        # instances) that Pydantic struggles to serialise which then surface as
+        # warnings when GEPA tries to log `Prediction` instances.  We drop
+        # these helpers early to keep the internal store clean and JSON
+        # serialisable.
         del self._demos
         del self._input_keys
 
         self._completions = None
         self._lm_usage = None
+
+        # Newer GEPA metrics can return fine‑grained ``subscores`` in addition
+        # to a top level score.  `Example` happily stores any field, but callers
+        # expect ``subscores`` to at least be present and behave like a
+        # dictionary.  Initialising it here avoids attribute errors and keeps
+        # serialisation stable even if a metric forgets to supply the field.
+        self._store.setdefault("subscores", {})
 
     def get_lm_usage(self):
         return self._lm_usage
@@ -116,6 +129,22 @@ class Prediction(Example):
     @property
     def completions(self):
         return self._completions
+
+    # Convenience accessors for subscores ---------------------------------
+    @property
+    def subscores(self):  # pragma: no cover - simple delegation
+        """Return any metric subscores associated with this prediction.
+
+        The attribute lives inside the underlying ``Example`` store; exposing
+        it as a property gives callers a stable interface and keeps pydantic
+        from complaining when the field is missing.
+        """
+
+        return self._store.setdefault("subscores", {})
+
+    @subscores.setter
+    def subscores(self, value):  # pragma: no cover - simple delegation
+        self._store["subscores"] = value or {}
 
 
 class Completions:

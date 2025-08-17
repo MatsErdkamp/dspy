@@ -23,9 +23,24 @@ DSPyTrace = list[tuple[Any, dict[str, Any], Prediction]]
 
 
 class ScoreWithFeedback(Prediction):
-    score: float
-    subscores: dict[str, float]
-    feedback: str
+    """Prediction enriched with feedback and per-component subscores.
+
+    ``Prediction`` itself happily stores arbitrary fields inside its internal
+    dictionary.  Defining an explicit ``__init__`` here provides a clear
+    interface and, importantly, ensures that ``subscores`` is always a
+    dictionary.  Pydantic can otherwise emit warnings when it encounters a
+    missing field during serialisation.
+    """
+
+    def __init__(
+        self,
+        *,
+        score: float,
+        subscores: dict[str, float] | None = None,
+        feedback: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(score=score, feedback=feedback, subscores=subscores or {}, **kwargs)
 
 
 class PredictorFeedbackFn(Protocol):
@@ -117,9 +132,18 @@ class DspyAdapter(GEPAAdapter[Example, TraceData, Prediction]):
                     else:
                         subscores.append({})
 
-            return EvaluationBatch(
-                outputs=outputs, scores=scores, subscores=subscores, trajectories=trajs
-            )
+            # Newer versions of GEPA's EvaluationBatch include an optional
+            # ``subscores`` field.  Older releases do not.  To keep DSPy
+            # compatible with both we inspect the dataclass at runtime and only
+            # pass the field when it is supported.
+            if "subscores" in getattr(EvaluationBatch, "__annotations__", {}):
+                return EvaluationBatch(
+                    outputs=outputs,
+                    scores=scores,
+                    subscores=subscores,
+                    trajectories=trajs,
+                )
+            return EvaluationBatch(outputs=outputs, scores=scores, trajectories=trajs)
         else:
             evaluator = Evaluate(
                 devset=batch,
@@ -140,9 +164,14 @@ class DspyAdapter(GEPAAdapter[Example, TraceData, Prediction]):
             ]
             subscores = subscores if any(subscores) else None
 
-            return EvaluationBatch(
-                outputs=outputs, scores=scores, subscores=subscores, trajectories=None
-            )
+            if "subscores" in getattr(EvaluationBatch, "__annotations__", {}):
+                return EvaluationBatch(
+                    outputs=outputs,
+                    scores=scores,
+                    subscores=subscores,
+                    trajectories=None,
+                )
+            return EvaluationBatch(outputs=outputs, scores=scores, trajectories=None)
 
     def make_reflective_dataset(self, candidate, eval_batch, components_to_update):
         from ..bootstrap_finetune import FailedPrediction
